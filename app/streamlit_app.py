@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import json
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -21,14 +22,33 @@ try:
 except ImportError:
     pass
 
-from src.config import DEFAULT_CV_MODEL_PATH, DEFAULT_RETRIEVAL_ARTIFACT_PATH, DEFAULT_WEATHER_MODEL_PATH, SAMPLE_IMAGES_DIR  # noqa: E402
+from src.config import DEFAULT_CLASS_NAMES_PATH, DEFAULT_CV_MODEL_PATH, DEFAULT_RETRIEVAL_ARTIFACT_PATH, DEFAULT_WEATHER_MODEL_PATH, REFERENCE_INDEX_DIR, SAMPLE_IMAGES_DIR  # noqa: E402
+from src.feedback_store import save_verified_feedback  # noqa: E402
 from src.gradcam import gradcam_predict  # noqa: E402
-from src.image_retrieval import find_similar_images  # noqa: E402
 from src.multimodal_predict import build_advanced_summary, predict_weather_risk  # noqa: E402
 from src.plant_id import identify_plant_local, identify_plant_plantnet  # noqa: E402
 from src.problem_taxonomy import map_disease_class_to_problem_category  # noqa: E402
+from src.reference_retrieval import find_reference_matches  # noqa: E402
 from src.visual_triage import analyze_leaf_visual_triage  # noqa: E402
 from src.weather_features import fetch_weather_features  # noqa: E402
+
+
+def _class_names_count() -> int | None:
+    if not DEFAULT_CLASS_NAMES_PATH.exists():
+        return None
+    try:
+        return len(json.loads(DEFAULT_CLASS_NAMES_PATH.read_text(encoding="utf-8")))
+    except Exception:
+        return None
+
+
+def _latest_model_version() -> str:
+    versions_dir = Path("models/versions")
+    if versions_dir.exists():
+        versions = sorted([path.name for path in versions_dir.iterdir() if path.is_dir()])
+        if versions:
+            return versions[-1]
+    return "latest"
 
 
 st.set_page_config(page_title="CropVision", layout="wide")
@@ -65,6 +85,10 @@ with st.sidebar:
     st.header("Model status")
     if DEFAULT_CV_MODEL_PATH.exists():
         st.success("Disease model found")
+        class_count = _class_names_count()
+        st.caption(f"Model version: {_latest_model_version()}")
+        if class_count is not None:
+            st.caption(f"Trained disease classes: {class_count}")
     else:
         st.error("Disease model missing")
     if DEFAULT_WEATHER_MODEL_PATH.exists():
@@ -73,6 +97,8 @@ with st.sidebar:
         st.info("Weather model optional")
     if DEFAULT_RETRIEVAL_ARTIFACT_PATH.exists():
         st.success("Retrieval index found")
+    elif (REFERENCE_INDEX_DIR / "index.joblib").exists():
+        st.success("Reference retrieval index found")
     else:
         st.info("Retrieval index optional")
 
@@ -175,12 +201,15 @@ with right:
 
 raw_disease = disease_result["raw_predicted_class"]
 problem_category = "unknown_or_uncertain" if disease_result["is_uncertain"] else map_disease_class_to_problem_category(raw_disease)
+normalized_prediction = __import__("src.label_normalizer", fromlist=["normalize_label"]).normalize_label(raw_disease)
 
 pred_col, top_col = st.columns([1, 1])
 with pred_col:
     st.subheader("Disease/problem prediction")
     display_label = "uncertain" if disease_result["is_uncertain"] else raw_disease
     st.metric(display_label, f"{disease_result['confidence']:.1%}")
+    st.write(f"Plant species: **{normalized_prediction['plant_species']}**")
+    st.write(f"Disease name: **{normalized_prediction['disease_name']}**")
     st.write(f"Broad issue category: **{problem_category}**")
     if disease_result["is_uncertain"]:
         st.warning(disease_result["uncertainty_reason"])
@@ -192,18 +221,19 @@ with top_col:
 
 similar_examples = []
 if enable_retrieval:
-    st.subheader("Visually similar training examples")
-    if DEFAULT_RETRIEVAL_ARTIFACT_PATH.exists():
+    st.subheader("Reference examples from training database")
+    if (REFERENCE_INDEX_DIR / "index.joblib").exists():
         try:
-            similar_examples = find_similar_images(str(tmp_path), top_k=3)
+            similar_examples = find_reference_matches(str(tmp_path), top_k=3)
             sim_cols = st.columns(max(1, len(similar_examples)))
             for col, item in zip(sim_cols, similar_examples):
                 with col:
-                    st.image(item["image_path"], caption=f"{item['label']} ({item['similarity']:.2f})", use_container_width=True)
+                    caption = f"{item['class_label']} ({item['similarity_score']:.2f})"
+                    st.image(item["image_path"], caption=caption, use_container_width=True)
         except Exception as exc:
-            st.info(f"Similarity retrieval unavailable: {exc}")
+            st.info(f"Reference retrieval unavailable: {exc}")
     else:
-        st.info("Retrieval index missing. Build it with `python -m src.image_retrieval --data_dir data/processed/plantvillage_sample --build_index`.")
+        st.info("Reference index missing. Build it with `python -m src.reference_retrieval --build_index --data_dir data/processed/cropvision_reference_train --output_dir models/reference_index`.")
 
 weather_result = None
 if enable_weather:
@@ -233,3 +263,21 @@ summary = build_advanced_summary(
 )
 st.subheader("Final conservative interpretation")
 st.markdown(f"<div class='interpretation-card'>{summary}</div>", unsafe_allow_html=True)
+st.warning("The model can only recognize diseases represented in its training database. Unknown plants or diseases may produce uncertain predictions.")
+
+st.subheader("Verified feedback")
+st.caption("Optional: save this uploaded image only if you can confirm the correct label. The app will not retrain automatically.")
+confirm_prediction = st.checkbox("I confirm/correct this label for future explicit retraining")
+correct_label = st.text_input("Correct label", value=raw_disease)
+if st.button("Save verified feedback", disabled=not confirm_prediction):
+    try:
+        metadata = save_verified_feedback(
+            tmp_path,
+            correct_label,
+            original_prediction=raw_disease,
+            reference_matches=similar_examples,
+            model_version=_latest_model_version(),
+        )
+        st.success(f"Saved verified feedback: {metadata['normalized_label']['normalized_class']}")
+    except Exception as exc:
+        st.error(f"Could not save feedback: {exc}")

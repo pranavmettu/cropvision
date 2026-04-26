@@ -2,7 +2,7 @@
 
 ## Model Name
 
-CropVision plant disease image classifier
+CropVision reference disease classifier
 
 ## Intended Use
 
@@ -14,9 +14,7 @@ This model is not intended for professional crop diagnosis, agronomic decisions,
 
 ## Dataset
 
-Expected dataset format: ImageFolder under `data/raw/plantvillage/`.
-
-TODO: Replace this template with the exact dataset source, license, class list, and collection conditions after training.
+Training datasets are expected under `data/processed/cropvision_reference_train/`, built from imported public reference datasets such as PlantVillage and the Kaggle New Plant Diseases Dataset.
 
 ## Architecture
 
@@ -28,7 +26,11 @@ CPU-friendly transfer learning with 224x224 images, ImageNet normalization, opti
 
 ## Metrics
 
-Run `python -m src.evaluate_cv --data_dir data/raw/plantvillage` to populate accuracy, macro F1, weighted F1, top-3 accuracy, confusion matrices, calibration curve, and misclassified examples.
+Run `python -m src.evaluate_cv --data_dir data/processed/cropvision_reference_train` to populate accuracy, macro F1, weighted F1, top-3 accuracy, confusion matrices, calibration curve, and misclassified examples. Run external validation on PlantDoc with `python -m src.external_validate --data_dir data/processed/reference_datasets/plantdoc --model_version reference_v1`.
+
+## Retraining Notes
+
+User uploads are not used for automatic training. Only human-verified images saved under `data/user_feedback/verified/` should be included through `src.retrain_with_feedback`.
 
 ## Known Limitations
 

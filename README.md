@@ -1,381 +1,221 @@
-# CropVision: Multimodal Plant Disease Diagnosis
+# CropVision: Reference-Data Plant Health Recognition
 
-CropVision is a multimodal agtech ML project that uses computer vision to classify plant leaf diseases, Grad-CAM to explain model predictions, and weather-derived features to estimate contextual crop stress risk.
+CropVision is an ML engineering case study for plant health recognition. It uses public plant disease image datasets as reference data for training, evaluation, Grad-CAM explainability, weather-risk context, visual retrieval, and explicit human-verified feedback retraining.
 
-**Live demo:** TODO: Add Hugging Face Spaces URL after deployment.
+> Educational ML demo only. Not professional crop diagnosis or treatment advice.
 
-> This project is for educational ML demonstration only. It is not professional crop diagnosis or agronomic advice.
+## What “Database Access” Means
 
-## One-Sentence Summary
+CropVision uses public plant disease image datasets as reference data for training and retrieval. The model does not access a database magically at prediction time. Instead, dataset ingestion scripts download or import plant disease datasets, normalize labels, build a combined ImageFolder dataset, train a disease classifier, and create a reference image retrieval index. During prediction, the app uses the trained model plus visually similar examples from the reference database. Uploaded user images can be saved only with confirmation and used later for explicit retraining.
 
-An end-to-end, CPU-friendly ML engineering case study for plant disease screening with PyTorch transfer learning, explainability, uncertainty handling, external validation, weather risk modeling, Streamlit deployment, and inference benchmarking.
+## Supported Reference Image Datasets
 
-## Problem Statement
-
-Plant disease screening is difficult to scale because visual symptoms vary by crop, disease stage, environment, camera quality, and field conditions. A simple image classifier can look impressive on clean datasets, but real-world credibility requires evaluation, uncertainty, explainability, and deployment awareness.
-
-CropVision demonstrates what a stronger portfolio-ready workflow looks like: train a baseline vision model, explain predictions with Grad-CAM, report model quality, flag uncertain predictions, validate on external data, and benchmark inference for deployment.
-
-## Why This Matters For Agtech
-
-Early disease detection can help farmers, agronomists, and researchers prioritize scouting and reduce crop losses. In practice, image symptoms alone are not enough; weather context such as rainfall, humidity, temperature, wet days, and heat stress can affect disease pressure. CropVision shows how leaf image predictions can be combined with environmental signals while clearly communicating limitations.
-
-## Key Features
-
-- PyTorch transfer learning with ResNet18 or EfficientNet-B0
-- CPU-friendly defaults with optional frozen backbone training
-- ImageFolder support for PlantVillage-style datasets
-- Dataset inspection and class distribution reporting
-- Training history, early stopping, LR scheduling, and optional weighted loss
-- Evaluation with accuracy, macro F1, weighted F1, top-3 accuracy, confusion matrices, calibration curve, and misclassification gallery
-- External validation on PlantDoc or any ImageFolder-style dataset with overlapping classes
-- Confidence thresholding and uncertainty warnings
-- Optional two-stage advanced mode with plant/species identification plus local disease/problem recognition
-- Broad symptom taxonomy that maps narrow disease labels into practical plant health issue categories
-- Visual similarity retrieval for comparing uploads with indexed training examples
-- Grad-CAM single-image explanations and gallery generation
-- NASA POWER weather feature extraction and synthetic RandomForest risk model
-- Optional MLflow experiment tracking
-- ONNX export and CPU inference benchmarking
-- Streamlit app and Hugging Face Spaces deployment entrypoint
-- Health check script, Makefile workflow, tests, and model card template
-
-## Technical Architecture
-
-```text
-ImageFolder dataset
-  -> dataset inspection
-  -> PyTorch transfer-learning training
-  -> checkpoint + class_names.json
-  -> evaluation reports + calibration + model card
-  -> Grad-CAM explanations
-  -> Streamlit app
-
-External ImageFolder dataset
-  -> overlapping class filter
-  -> external validation report
-
-NASA POWER weather data
-  -> engineered weather features
-  -> synthetic RandomForest risk model
-  -> optional multimodal interpretation
-
-Trained PyTorch checkpoint
-  -> ONNX export
-  -> CPU inference benchmark
-
-Advanced mode
-  -> optional Pl@ntNet plant ID or local species-model adapter
-  -> local disease/problem classifier
-  -> broad problem taxonomy
-  -> optional similar-image retrieval
-  -> weather-aware conservative interpretation
-```
-
-## Advanced Plant Health Recognition Mode
-
-CropVision can run as a two-stage plant health recognition system:
-
-1. Identify the plant/species using the optional Pl@ntNet API or an optional local species-recognition adapter.
-2. Diagnose the visible health issue using the local disease/problem model, confidence thresholds, broad symptom categories, weather risk, and similar-image retrieval.
-
-The local disease model recognizes only the classes it was trained on. Pl@ntNet can expand plant/species identification to many more plants, but it is optional and requires a free API key. If no API key is provided, the app still runs with local models and shows a clear message.
-
-The problem taxonomy turns narrow labels such as `Tomato___Early_blight` into broader categories such as `blight_like_symptoms`. Retrieval mode shows visually similar indexed training images so a user can compare the upload against known examples. The system is uncertainty-aware and should not force diagnoses for unknown classes, low-confidence predictions, or images outside the training distribution.
-
-CropVision Advanced Mode uses a two-stage plant health recognition pipeline. First, it identifies the plant using an optional large-scale species identification service or local species model. Then it applies a local disease/problem classifier, maps narrow disease classes into broader symptom categories, retrieves visually similar examples, and combines the result with weather-derived crop stress features. This makes the system more realistic than a closed-set classifier because it can separate plant identification from problem detection and report uncertainty when the image falls outside the model’s training distribution.
-
-Create a local `.env` file for optional Pl@ntNet support:
-
-```bash
-cp .env.example .env
-```
-
-Then edit `.env`:
-
-```text
-PLANTNET_API_KEY=your_api_key_here
-```
-
-Build a visual retrieval index:
-
-```bash
-python -m src.image_retrieval --data_dir data/processed/plantvillage_sample --build_index
-```
-
-Run the advanced demo check:
-
-```bash
-python scripts/run_advanced_demo_check.py
-```
-
-Optional local species models can be connected through `src/local_species_model.py`. Large iNaturalist/timm models can be heavy, so they are not required by default.
+- **PlantVillage**: controlled leaf images, about 54k images and 38 crop/disease classes. Best as core training data.
+- **New Plant Diseases Dataset from Kaggle**: larger controlled RGB leaf dataset, about 87k images and 38 classes. Best as larger reference training data if available.
+- **PlantDoc**: real-world field-style images, about 2,598 images. Best for external validation/domain-shift checks.
+- **Future species datasets**: PlantCLEF or iNaturalist-style data can support species ID, but they are not required for disease training.
 
 ## Dataset Setup
 
-Use PlantVillage or any ImageFolder-style disease dataset:
+List supported datasets:
+
+```bash
+python -m src.dataset_registry --list
+```
+
+Import PlantVillage from local folder:
+
+```bash
+python -m src.dataset_manager --import-local --dataset plantvillage --source_dir data/raw/plantvillage --output_dir data/processed/reference_datasets/plantvillage
+```
+
+Import PlantDoc from local folder:
+
+```bash
+python -m src.dataset_manager --import-local --dataset plantdoc --source_dir data/raw/plantdoc --output_dir data/processed/reference_datasets/plantdoc
+```
+
+Download Kaggle New Plant Diseases Dataset:
+
+```bash
+python -m src.dataset_manager --download-kaggle --dataset new_plant_diseases_kaggle --output_dir data/raw/kaggle_new_plant_diseases
+```
+
+Kaggle setup:
+
+1. `pip install kaggle`
+2. Create a Kaggle API token from your Kaggle account settings.
+3. Place `kaggle.json` in `~/.kaggle/`.
+4. Rerun the download command.
+
+Do not commit Kaggle credentials.
+
+## Label Normalization
+
+CropVision normalizes messy labels into:
+
+- `plant_species`
+- `disease_name`
+- `health_status`
+- `normalized_class`
+- `broad_problem_category`
+
+Example:
 
 ```text
-data/raw/plantvillage/
-  Apple___healthy/
-    image1.jpg
-  Apple___Apple_scab/
-    image2.jpg
+Tomato___Early_blight -> tomato__early_blight
+Corn_(maize)___Common_rust_ -> corn_maize__common_rust
 ```
 
-TODO: Download your dataset manually and place class folders under `data/raw/plantvillage/`. The repo does not include training images.
+Label maps are saved to:
 
-For external validation, use PlantDoc or another ImageFolder dataset:
+- `models/label_map.json`
+- `reports/label_normalization_report.csv`
 
-```text
-data/raw/plantdoc/
-  Apple___healthy/
-  Apple___Apple_scab/
-```
-
-External validation only scores classes whose folder names overlap with `models/class_names.json`; unknown folders are skipped and reported.
-
-## Setup
+## Build Combined Reference Dataset
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python -m src.build_reference_dataset --datasets plantvillage,new_plant_diseases_kaggle --source_root data/processed/reference_datasets --output_dir data/processed/cropvision_reference_train --normalize_labels --max_images_per_class 1000 --seed 42
 ```
 
-Windows:
+Outputs:
 
-```powershell
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
+- `reports/reference_dataset_report.json`
+- `reports/reference_dataset_class_distribution.csv`
+- `reports/figures/reference_dataset_class_distribution.png`
 
-## Training
-
-Inspect the dataset:
+## Train Reference Disease Model
 
 ```bash
-python -m src.inspect_dataset --data_dir data/raw/plantvillage
+python -m src.train_cv --data_dir data/processed/cropvision_reference_train --model_name efficientnet_b0 --epochs 8 --batch_size 16 --freeze_backbone --weighted_loss --label_smoothing 0.05 --model_version_name reference_v1
 ```
 
-Train a CPU-friendly model:
+Versioned outputs:
 
-```bash
-python -m src.train_cv --data_dir data/raw/plantvillage --epochs 3
-```
+- `models/versions/reference_v1/cropvision_cv.pt`
+- `models/versions/reference_v1/class_names.json`
+- `models/versions/reference_v1/label_map.json`
+- `models/versions/reference_v1/training_config.json`
+- `models/versions/reference_v1/metrics.json`
 
-Quick smoke test:
+Latest outputs:
 
-```bash
-python -m src.train_cv --data_dir data/raw/plantvillage --epochs 1 --max_images_per_class 20
-```
-
-Optional MLflow tracking:
-
-```bash
-pip install mlflow
-python -m src.train_cv --data_dir data/raw/plantvillage --epochs 3 --use_mlflow
-```
-
-MLflow is optional. If it is not installed, training continues normally with a helpful message.
+- `models/cropvision_cv.pt`
+- `models/class_names.json`
 
 ## Evaluation
 
 ```bash
-python -m src.evaluate_cv --data_dir data/raw/plantvillage
+python -m src.evaluate_cv --data_dir data/processed/cropvision_reference_train
 ```
-
-Outputs:
-
-- `reports/classification_report.csv`
-- `reports/eval_metrics.json`
-- `reports/model_card.md`
-- `reports/figures/confusion_matrix.png`
-- `reports/figures/confusion_matrix_normalized.png`
-- `reports/figures/calibration_curve.png`
-- `reports/figures/misclassified_examples/`
 
 ## External Validation
 
+External validate on PlantDoc:
+
 ```bash
-python -m src.external_validate --data_dir data/raw/plantdoc
+python -m src.external_validate --data_dir data/processed/reference_datasets/plantdoc --model_version reference_v1
+```
+
+External validation reports exact class matching, normalized class matching, and broad problem-category matching. This is important because PlantDoc-style field images differ from clean controlled training images.
+
+## Build Reference Retrieval Index
+
+```bash
+python -m src.reference_retrieval --build_index --data_dir data/processed/cropvision_reference_train --output_dir models/reference_index
 ```
 
 Outputs:
 
-- `reports/external_validation_metrics.json`
-- `reports/external_validation_report.csv`
-- `reports/external_validation_report.md`
-- `reports/figures/external_confusion_matrix.png`
-- `reports/figures/external_confusion_matrix_normalized.png`
+- `models/reference_index/embeddings.npz`
+- `models/reference_index/index.joblib`
+- `models/reference_index/metadata.csv`
 
-External validation is intentionally strict about domain shift. Clean PlantVillage-style images often differ from real field images in lighting, background complexity, occlusion, blur, disease stage, and camera distance. Weak external validation is useful evidence: it shows where the model is likely to fail outside the original training distribution.
+If FAISS is installed, CropVision can use it. Otherwise it uses `sklearn.neighbors.NearestNeighbors`.
 
-## Calibration And Uncertainty
-
-CropVision computes Expected Calibration Error during evaluation and saves a reliability diagram. During prediction and in the app, a confidence threshold can return `uncertain` rather than forcing a disease label.
-
-```bash
-python -m src.predict_cv --image_path path/to/leaf.jpg --confidence_threshold 0.6
-```
-
-Low confidence can indicate an out-of-distribution image, poor image quality, ambiguous symptoms, or a disease class not represented in training data.
-
-## Grad-CAM Explainability
-
-Single-image Grad-CAM:
-
-```bash
-python -m src.gradcam --image_path path/to/leaf.jpg
-```
-
-Gallery:
-
-```bash
-python -m src.generate_gradcam_gallery --data_dir data/raw/plantvillage --num_images 12
-```
-
-Outputs are saved under `reports/figures/gradcam_gallery/`.
-
-## Weather-Risk Module
-
-Train the synthetic weather risk model:
-
-```bash
-python -m src.train_weather_model
-```
-
-The weather module can fetch NASA POWER daily data and engineer features such as rainfall, humidity, average temperature, max temperature, heat stress days, and wet days. The included risk model is a synthetic RandomForest demo and should be replaced with real disease incidence labels for practical use.
-
-## ONNX Export And Benchmarking
-
-Export the trained model:
-
-```bash
-python -m src.export_onnx
-```
-
-Optional ONNX tools:
-
-```bash
-pip install onnx onnxruntime
-```
-
-Benchmark PyTorch CPU inference and ONNX Runtime if installed:
-
-```bash
-python -m src.benchmark_inference --iterations 50
-```
-
-Output:
-
-- `reports/inference_benchmark.json`
-
-## Streamlit App
+## Run App
 
 ```bash
 streamlit run app/streamlit_app.py
 ```
 
-The app supports:
+The app shows:
 
-- Image upload
-- Optional demo images from `sample_images/`
-- Local disease-only mode
-- Advanced plant ID + disease model mode
-- Optional Pl@ntNet API plant identification
-- Optional visual similarity retrieval
-- Top prediction and top-3 probabilities
-- Confidence threshold slider
-- Uncertainty warnings
-- Grad-CAM overlay
-- Optional NASA POWER weather risk
-- Educational disclaimer
+- Current trained model version
+- Number of trained disease classes
+- Whether a reference retrieval index exists
+- Predicted disease class
+- Normalized plant species and disease name
+- Broad problem category
+- Confidence and top-3 predictions
+- Grad-CAM
+- Reference examples from training database
+- Optional weather risk
+- Verified feedback form
 
-The app launches without requiring external APIs. Weather features are only fetched when the user enables that option.
+Warning: the model can only recognize diseases represented in its training database. Unknown plants or diseases may produce uncertain predictions.
 
-Run:
+## Use Uploaded Images As Verified Feedback
 
-```bash
-streamlit run app/streamlit_app.py
+Uploaded user images are never used for automatic training. If a human confirms or corrects the label in the app, the image is saved under:
+
+```text
+data/user_feedback/verified/{normalized_class}/
 ```
 
-## Hugging Face Spaces Deployment
+Metadata includes:
 
-Create a new Hugging Face Space:
+- original prediction
+- normalized label
+- image characteristics
+- reference retrieval matches
+- model version
 
-1. Choose **Streamlit** as the SDK.
-2. Use CPU hardware.
-3. Upload or push this repo.
-4. Hugging Face Spaces will use root `app.py`, `requirements.txt`, and `packages.txt`.
-5. For a fully functional image demo, include a trained checkpoint:
-   - `models/cropvision_cv.pt`
-   - `models/class_names.json`
-6. For a lightweight public demo, omit the checkpoint and the app will show a friendly “train the model first” message.
-
-Do not hardcode secrets. No GPU is required.
-
-## Results Table Placeholder
-
-Replace this table after training on your dataset.
-
-| Evaluation setting | Accuracy | Macro F1 | Weighted F1 | Top-3 accuracy | Notes |
-|---|---:|---:|---:|---:|---|
-| Internal validation | TODO | TODO | TODO | TODO | PlantVillage-style split |
-| External validation | TODO | TODO | TODO | TODO | PlantDoc or field-style data |
-| PyTorch CPU latency | TODO |  |  |  | See `reports/inference_benchmark.json` |
-| ONNX CPU latency | TODO |  |  |  | Optional ONNX Runtime |
-
-## Makefile Workflow
+## Retrain With Feedback
 
 ```bash
-make setup
-make inspect
-make train
-make evaluate
-make external-validate DATA_DIR=data/raw/plantdoc
-make retrieval
-make export-onnx
-make benchmark
-make mlflow-train
-make advanced-check
+python -m src.retrain_with_feedback --base_data_dir data/processed/cropvision_reference_train --feedback_dir data/user_feedback/verified --model_version_name reference_plus_feedback_v1
+```
+
+Why not blind self-training? Because model predictions can be wrong, especially for unknown plants, new diseases, low-quality images, or domain-shifted field conditions. CropVision only uses human-verified images for feedback retraining.
+
+## Makefile Commands
+
+```bash
+make datasets-list
+make import-plantvillage
+make import-plantdoc
+make build-reference-data
+make train-reference
+make external-validate DATA_DIR=data/processed/reference_datasets/plantdoc
+make build-reference-index
 make app
+make retrain-feedback
 make check
 ```
 
-Use the local virtual environment explicitly if needed:
+Use `.venv` explicitly if needed:
 
 ```bash
 make check PYTHON=.venv/bin/python
 ```
 
-## Known Limitations
+## Limitations
 
-- PlantVillage images are controlled and may not generalize to field images.
-- Advanced plant ID depends on Pl@ntNet availability and API-key configuration unless a local species model is configured.
-- Local disease/problem recognition remains closed-set to trained classes.
-- Retrieval quality depends on the indexed image set and feature extractor.
-- External validation depends on exact class-name overlap.
-- Weather risk is synthetic/demo unless trained with real disease incidence data.
-- Grad-CAM is an interpretability aid, not proof of causal disease symptoms.
-- Confidence scores can be miscalibrated after dataset shift.
-- This project is not a replacement for expert agronomic diagnosis.
-
-## Future Improvements
-
-- Train and validate on larger field-image datasets.
-- Add stronger calibration with persisted temperature scaling.
-- Add model drift checks for deployed demos.
-- Add lesion segmentation or object detection as future work.
-- Add Docker deployment after the core ML workflow is stable.
+- Public datasets have licensing and redistribution constraints.
+- PlantVillage and Kaggle images are controlled and may not generalize to field images.
+- PlantDoc is useful for external validation but small.
+- Label normalization is heuristic and should be reviewed for high-stakes use.
+- Retrieval shows visual similarity, not proof of diagnosis.
+- No automatic treatment recommendations are provided.
 
 ## Resume Bullets
 
-- Built an explainable plant disease classification system using PyTorch transfer learning, Grad-CAM visualizations, and confidence-aware predictions.
-- Developed a two-stage plant health recognition dashboard combining optional plant species identification, local disease classification, broad symptom taxonomy, and weather-derived crop stress risk features.
-- Implemented model evaluation tooling including top-k accuracy, macro F1, confusion matrices, calibration analysis, external validation, and misclassification galleries.
-- Added retrieval-based visual similarity, ONNX export, CPU inference benchmarking, optional MLflow tracking, health checks, tests, and a Streamlit/Hugging Face Spaces workflow.
+- Built a reference-data plant disease recognition system using public plant disease datasets, PyTorch transfer learning, label normalization, Grad-CAM, and visual retrieval.
+- Designed dataset ingestion pipelines for PlantVillage, Kaggle New Plant Diseases, and PlantDoc with import reports, corrupt-image handling, duplicate detection, and normalized ImageFolder outputs.
+- Implemented model versioning, external validation, reference image retrieval, and human-verified feedback retraining workflows.
+- Developed a Streamlit app that separates trained model predictions from reference examples and avoids blind self-training from user uploads.
 
 ## Interview Explanation
 
-CropVision is a multimodal agtech ML project that uses computer vision to classify plant leaf diseases, Grad-CAM to explain model predictions, and weather-derived features to estimate contextual crop stress risk. I added calibration, uncertainty handling, external validation, and inference benchmarking to make the project closer to a real ML engineering workflow rather than a simple image classifier.
+CropVision is a plant health recognition project that treats public plant disease datasets as explicit reference data. I built ingestion scripts to import PlantVillage, Kaggle plant disease data, and PlantDoc, normalize labels across datasets, build a combined reference training set, train a versioned disease classifier, and create a visual retrieval index. During prediction, the app uses the trained model and visually similar reference examples, but it does not magically query a database or train on its own predictions. User uploads can only become training data after human confirmation, which makes the workflow safer and more realistic.

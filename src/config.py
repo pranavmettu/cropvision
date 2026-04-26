@@ -21,6 +21,10 @@ DEFAULT_EVAL_METRICS_PATH = REPORTS_DIR / "eval_metrics.json"
 DEFAULT_CLASSIFICATION_REPORT_PATH = REPORTS_DIR / "classification_report.csv"
 RETRIEVAL_DIR = MODEL_DIR / "retrieval"
 DEFAULT_RETRIEVAL_ARTIFACT_PATH = RETRIEVAL_DIR / "retrieval_artifacts.joblib"
+REFERENCE_INDEX_DIR = MODEL_DIR / "reference_index"
+REFERENCE_DATASETS_DIR = PROCESSED_DATA_DIR / "reference_datasets"
+REFERENCE_TRAIN_DIR = PROCESSED_DATA_DIR / "cropvision_reference_train"
+USER_FEEDBACK_DIR = DATA_DIR / "user_feedback" / "verified"
 PLANT_ID_EXAMPLES_DIR = REPORTS_DIR / "plant_id_examples"
 LOCAL_SPECIES_MODEL_NAME = None
 

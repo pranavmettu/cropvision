@@ -42,6 +42,13 @@ IMPORTS = [
     "src.local_species_model",
     "src.problem_taxonomy",
     "src.image_retrieval",
+    "src.dataset_registry",
+    "src.dataset_manager",
+    "src.label_normalizer",
+    "src.build_reference_dataset",
+    "src.reference_retrieval",
+    "src.feedback_store",
+    "src.retrain_with_feedback",
 ]
 
 KEY_SOURCE_FILES = [
@@ -53,6 +60,13 @@ KEY_SOURCE_FILES = [
     ROOT / "src" / "plant_id.py",
     ROOT / "src" / "problem_taxonomy.py",
     ROOT / "src" / "image_retrieval.py",
+    ROOT / "src" / "dataset_registry.py",
+    ROOT / "src" / "dataset_manager.py",
+    ROOT / "src" / "label_normalizer.py",
+    ROOT / "src" / "build_reference_dataset.py",
+    ROOT / "src" / "reference_retrieval.py",
+    ROOT / "src" / "feedback_store.py",
+    ROOT / "src" / "retrain_with_feedback.py",
     ROOT / "scripts" / "run_advanced_demo_check.py",
     ROOT / "Makefile",
     ROOT / "README.md",

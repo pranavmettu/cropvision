@@ -23,6 +23,7 @@ from torchvision import datasets
 from src.config import DEFAULT_CLASS_NAMES_PATH, DEFAULT_CV_MODEL_PATH, DEFAULT_DATA_DIR, FIGURES_DIR, REPORTS_DIR, ensure_project_dirs
 from src.dataset import get_eval_transforms
 from src.evaluate_cv import plot_confusion_matrix, top_k_accuracy
+from src.label_normalizer import normalize_label
 from src.predict_cv import load_cv_model
 from src.utils import get_device, load_class_names
 
@@ -35,18 +36,27 @@ class OverlapImageFolder(Dataset):
         self.transform = get_eval_transforms()
         self.trained_class_names = trained_class_names
         self.trained_class_to_idx = {name: idx for idx, name in enumerate(trained_class_names)}
+        self.normalized_to_trained = {normalize_label(name)["normalized_class"]: idx for idx, name in enumerate(trained_class_names)}
         self.samples: list[tuple[str, int, str]] = []
+        self.normalized_samples: list[tuple[str, int, str]] = []
         self.unknown_class_counts: dict[str, int] = {}
 
         for path, external_idx in self.base.samples:
             external_name = self.base.classes[external_idx]
             if external_name in self.trained_class_to_idx:
                 self.samples.append((path, self.trained_class_to_idx[external_name], external_name))
+            elif normalize_label(external_name)["normalized_class"] in self.normalized_to_trained:
+                trained_idx = self.normalized_to_trained[normalize_label(external_name)["normalized_class"]]
+                self.normalized_samples.append((path, trained_idx, external_name))
             else:
                 self.unknown_class_counts[external_name] = self.unknown_class_counts.get(external_name, 0) + 1
 
-        self.overlap_class_names = [name for name in trained_class_names if name in set(item[2] for item in self.samples)]
-        self.overlap_label_indices = [self.trained_class_to_idx[name] for name in self.overlap_class_names]
+        if not self.samples and self.normalized_samples:
+            self.samples = self.normalized_samples
+
+        sample_label_indices = sorted({label for _, label, _ in self.samples})
+        self.overlap_label_indices = sample_label_indices
+        self.overlap_class_names = [trained_class_names[idx] for idx in sample_label_indices]
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -75,6 +85,9 @@ def write_external_report(
 - Macro F1: {metrics["macro_f1"]:.4f}
 - Weighted F1: {metrics["weighted_f1"]:.4f}
 - Top-3 accuracy: {metrics["top_3_accuracy"]:.4f}
+- Exact class match accuracy: {metrics.get("exact_match_accuracy", 0):.4f}
+- Normalized class match accuracy: {metrics.get("normalized_match_accuracy", 0):.4f}
+- Broad problem category accuracy: {metrics.get("broad_problem_category_accuracy", 0):.4f}
 
 ## Unknown Classes Skipped
 
@@ -101,6 +114,10 @@ Use this report as a robustness check. Strong in-distribution performance with w
 def external_validate(args: argparse.Namespace) -> None:
     ensure_project_dirs()
     device = get_device(args.cpu)
+    if args.model_version:
+        version_dir = Path("models") / "versions" / args.model_version
+        args.checkpoint = version_dir / "cropvision_cv.pt"
+        args.class_names_path = version_dir / "class_names.json"
     class_names = load_class_names(Path(args.class_names_path))
     model, _, _ = load_cv_model(Path(args.checkpoint), device, Path(args.class_names_path))
     dataset = OverlapImageFolder(Path(args.data_dir), class_names)
@@ -150,6 +167,15 @@ def external_validate(args: argparse.Namespace) -> None:
         "num_overlap_classes": int(len(overlap_names)),
         "unknown_class_counts": dataset.unknown_class_counts,
     }
+    true_raw = [item[2] for item in dataset.samples]
+    pred_raw = [class_names[idx] for idx in pred_array]
+    true_norm = [normalize_label(name)["normalized_class"] for name in true_raw]
+    pred_norm = [normalize_label(name)["normalized_class"] for name in pred_raw]
+    true_broad = [normalize_label(name)["broad_problem_category"] for name in true_raw]
+    pred_broad = [normalize_label(name)["broad_problem_category"] for name in pred_raw]
+    metrics["exact_match_accuracy"] = float(np.mean([t == p for t, p in zip(true_raw, pred_raw)]))
+    metrics["normalized_match_accuracy"] = float(np.mean([t == p for t, p in zip(true_norm, pred_norm)]))
+    metrics["broad_problem_category_accuracy"] = float(np.mean([t == p for t, p in zip(true_broad, pred_broad)]))
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
@@ -168,6 +194,8 @@ def external_validate(args: argparse.Namespace) -> None:
     print(f"Macro F1: {metrics['macro_f1']:.4f}")
     print(f"Weighted F1: {metrics['weighted_f1']:.4f}")
     print(f"Top-3 accuracy: {metrics['top_3_accuracy']:.4f}")
+    print(f"Normalized match accuracy: {metrics['normalized_match_accuracy']:.4f}")
+    print(f"Broad problem category accuracy: {metrics['broad_problem_category_accuracy']:.4f}")
     print(f"Saved external validation reports to {REPORTS_DIR}")
 
 
@@ -176,6 +204,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data_dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CV_MODEL_PATH)
     parser.add_argument("--class_names_path", type=Path, default=DEFAULT_CLASS_NAMES_PATH)
+    parser.add_argument("--model_version", type=str, default=None)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--metrics_json", type=Path, default=REPORTS_DIR / "external_validation_metrics.json")

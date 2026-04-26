@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import shutil
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -20,6 +22,7 @@ from src.config import (
     DEFAULT_DATA_DIR,
     DEFAULT_TRAIN_HISTORY_PATH,
     FIGURES_DIR,
+    MODEL_DIR,
     ensure_project_dirs,
 )
 from src.dataset import create_dataloaders
@@ -72,6 +75,22 @@ def build_model(num_classes: int, architecture: str = "resnet18", pretrained: bo
         in_features = model.classifier[1].in_features
         model.classifier[1] = nn.Linear(in_features, num_classes)
         return model
+    if architecture == "mobilenet_v3_small":
+        try:
+            model = models.mobilenet_v3_small(weights=_weights_or_none(models.MobileNet_V3_Small_Weights))
+        except Exception as exc:
+            print(f"Could not load pretrained MobileNetV3 weights ({exc}). Falling back to random initialization.")
+            model = models.mobilenet_v3_small(weights=None)
+        model.classifier[-1] = nn.Linear(model.classifier[-1].in_features, num_classes)
+        return model
+    if architecture == "convnext_tiny":
+        try:
+            model = models.convnext_tiny(weights=_weights_or_none(models.ConvNeXt_Tiny_Weights))
+        except Exception as exc:
+            print(f"Could not load pretrained ConvNeXt-Tiny weights ({exc}). Falling back to random initialization.")
+            model = models.convnext_tiny(weights=None)
+        model.classifier[-1] = nn.Linear(model.classifier[-1].in_features, num_classes)
+        return model
     if architecture == "resnet18":
         try:
             model = models.resnet18(weights=_weights_or_none(models.ResNet18_Weights))
@@ -80,7 +99,7 @@ def build_model(num_classes: int, architecture: str = "resnet18", pretrained: bo
             model = models.resnet18(weights=None)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
         return model
-    raise ValueError("architecture must be 'resnet18' or 'efficientnet_b0'.")
+    raise ValueError("architecture must be resnet18, efficientnet_b0, mobilenet_v3_small, or convnext_tiny.")
 
 
 def freeze_backbone_layers(model: nn.Module, architecture: str) -> None:
@@ -88,6 +107,9 @@ def freeze_backbone_layers(model: nn.Module, architecture: str) -> None:
         for name, parameter in model.named_parameters():
             parameter.requires_grad = name.startswith("fc.")
     elif architecture == "efficientnet_b0":
+        for name, parameter in model.named_parameters():
+            parameter.requires_grad = name.startswith("classifier.")
+    elif architecture in {"mobilenet_v3_small", "convnext_tiny"}:
         for name, parameter in model.named_parameters():
             parameter.requires_grad = name.startswith("classifier.")
 
@@ -197,6 +219,9 @@ def train(args: argparse.Namespace) -> None:
     set_seed(args.seed)
     device = get_device(args.cpu)
     data_dir = Path(args.data_dir)
+    version_dir = MODEL_DIR / "versions" / args.model_version_name if args.model_version_name else None
+    output_path = version_dir / "cropvision_cv.pt" if version_dir else Path(args.output)
+    class_names_output = version_dir / "class_names.json" if version_dir else Path(args.class_names_path)
     mlflow_context = maybe_start_mlflow(args)
     mlflow = mlflow_context[0] if mlflow_context else None
 
@@ -219,10 +244,13 @@ def train(args: argparse.Namespace) -> None:
         plot_class_distribution(class_names, train_labels, FIGURES_DIR / "class_distribution.png")
 
         if args.weighted_loss:
-            criterion = nn.CrossEntropyLoss(weight=class_weights_from_loader(train_loader, len(class_names), device))
+            criterion = nn.CrossEntropyLoss(
+                weight=class_weights_from_loader(train_loader, len(class_names), device),
+                label_smoothing=args.label_smoothing,
+            )
             print("Weighted loss enabled for class imbalance.")
         else:
-            criterion = nn.CrossEntropyLoss()
+            criterion = nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
         optimizer = optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=args.lr, weight_decay=args.weight_decay)
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=1)
 
@@ -230,8 +258,8 @@ def train(args: argparse.Namespace) -> None:
         best_val_loss = float("inf")
         epochs_without_improvement = 0
         history: list[dict[str, float]] = []
-        checkpoint_path = Path(args.output)
-        class_names_path = Path(args.class_names_path)
+        checkpoint_path = output_path
+        class_names_path = class_names_output
 
         for epoch in range(1, args.epochs + 1):
             train_loss, train_acc, train_f1 = run_epoch(model, train_loader, criterion, device, optimizer)
@@ -291,6 +319,28 @@ def train(args: argparse.Namespace) -> None:
         history_path.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(history).to_csv(history_path, index=False)
         plot_training_curves(history, FIGURES_DIR)
+        config_payload = vars(args).copy()
+        config_payload["data_dir"] = str(args.data_dir)
+        config_payload["output"] = str(args.output)
+        config_payload["class_names_path"] = str(args.class_names_path)
+        config_payload["history_path"] = str(args.history_path)
+        metrics_payload = {
+            "best_val_macro_f1": float(best_f1),
+            "best_val_loss": float(best_val_loss),
+            "epochs_trained": len(history),
+        }
+        if version_dir:
+            version_dir.mkdir(parents=True, exist_ok=True)
+            (version_dir / "training_config.json").write_text(json.dumps(config_payload, indent=2), encoding="utf-8")
+            (version_dir / "metrics.json").write_text(json.dumps(metrics_payload, indent=2), encoding="utf-8")
+            label_map_path = MODEL_DIR / "label_map.json"
+            if label_map_path.exists():
+                shutil.copy2(label_map_path, version_dir / "label_map.json")
+            if checkpoint_path.exists():
+                shutil.copy2(checkpoint_path, DEFAULT_CV_MODEL_PATH)
+            if class_names_path.exists():
+                shutil.copy2(class_names_path, DEFAULT_CLASS_NAMES_PATH)
+            print(f"Saved versioned model artifacts to {version_dir}")
         print(f"Saved training history to {history_path}")
         if mlflow is not None:
             mlflow.log_artifact(str(history_path))
@@ -304,18 +354,21 @@ def train(args: argparse.Namespace) -> None:
             mlflow.end_run()
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train CropVision computer vision model.")
     parser.add_argument("--data_dir", type=Path, default=DEFAULT_DATA_DIR)
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--val_split", type=float, default=0.2)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-4)
-    parser.add_argument("--model_name", choices=["resnet18", "efficientnet_b0"], default="resnet18")
-    parser.add_argument("--architecture", choices=["resnet18", "efficientnet_b0"], default=None, help="Backward-compatible alias for --model_name.")
+    parser.add_argument("--model_name", choices=["resnet18", "efficientnet_b0", "mobilenet_v3_small", "convnext_tiny"], default="efficientnet_b0")
+    parser.add_argument("--architecture", choices=["resnet18", "efficientnet_b0", "mobilenet_v3_small", "convnext_tiny"], default=None, help="Backward-compatible alias for --model_name.")
     parser.add_argument("--freeze_backbone", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--weighted_loss", action="store_true")
+    parser.add_argument("--fine_tune", action="store_true", help="Alias for --no-freeze_backbone.")
+    parser.add_argument("--weighted_loss", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--label_smoothing", type=float, default=0.05)
+    parser.add_argument("--model_version_name", type=str, default=None)
     parser.add_argument("--early_stopping_patience", type=int, default=3)
     parser.add_argument("--max_images_per_class", type=int, default=None)
     parser.add_argument("--confidence_threshold", type=float, default=0.5)
@@ -328,9 +381,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--history_path", type=Path, default=DEFAULT_TRAIN_HISTORY_PATH)
     parser.add_argument("--use_mlflow", action="store_true", help="Log optional training metadata to MLflow if installed.")
     parser.add_argument("--mlflow_experiment", type=str, default="CropVision")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.architecture is not None:
         args.model_name = args.architecture
+    if args.fine_tune:
+        args.freeze_backbone = False
     return args
 
 
