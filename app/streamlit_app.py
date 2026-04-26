@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import json
+import os
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -77,7 +78,15 @@ with st.sidebar:
     confidence_threshold = st.slider("Confidence threshold", 0.0, 1.0, 0.50, 0.05)
 
     st.header("Optional modules")
-    enable_plantnet = st.checkbox("Enable Pl@ntNet API", value=False, disabled=mode == "Local disease model only")
+    plantnet_key = os.getenv("PLANTNET_API_KEY")
+    plantnet_available = bool(plantnet_key and plantnet_key != "your_api_key_here")
+    enable_plantnet = st.checkbox(
+        "Enable Pl@ntNet API",
+        value=False,
+        disabled=mode == "Local disease model only" or not plantnet_available,
+    )
+    if mode == "Advanced plant ID + disease model" and not plantnet_available:
+        st.caption("Pl@ntNet is optional. Add a real PLANTNET_API_KEY in .env to enable species ID.")
     enable_local_species = st.checkbox("Enable local species fallback", value=False, disabled=mode == "Local disease model only")
     enable_weather = st.checkbox("Enable weather risk", value=False)
     enable_retrieval = st.checkbox("Enable visual similarity", value=False)
