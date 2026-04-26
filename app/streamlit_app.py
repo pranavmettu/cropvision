@@ -60,9 +60,18 @@ with st.sidebar:
     enable_retrieval = st.checkbox("Enable visual similarity", value=False)
 
     st.header("Model status")
-    st.success("Disease model found") if DEFAULT_CV_MODEL_PATH.exists() else st.error("Disease model missing")
-    st.success("Weather model found") if DEFAULT_WEATHER_MODEL_PATH.exists() else st.info("Weather model optional")
-    st.success("Retrieval index found") if DEFAULT_RETRIEVAL_ARTIFACT_PATH.exists() else st.info("Retrieval index optional")
+    if DEFAULT_CV_MODEL_PATH.exists():
+        st.success("Disease model found")
+    else:
+        st.error("Disease model missing")
+    if DEFAULT_WEATHER_MODEL_PATH.exists():
+        st.success("Weather model found")
+    else:
+        st.info("Weather model optional")
+    if DEFAULT_RETRIEVAL_ARTIFACT_PATH.exists():
+        st.success("Retrieval index found")
+    else:
+        st.info("Retrieval index optional")
 
     if enable_weather:
         st.header("Weather inputs")
