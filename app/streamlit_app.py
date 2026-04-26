@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 try:
     from dotenv import load_dotenv  # type: ignore
 
-    load_dotenv(PROJECT_ROOT / ".env")
+    load_dotenv(PROJECT_ROOT / ".env", override=True)
 except ImportError:
     pass
 
