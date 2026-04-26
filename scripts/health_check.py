@@ -38,6 +38,10 @@ IMPORTS = [
     "src.external_validate",
     "src.export_onnx",
     "src.benchmark_inference",
+    "src.plant_id",
+    "src.local_species_model",
+    "src.problem_taxonomy",
+    "src.image_retrieval",
 ]
 
 KEY_SOURCE_FILES = [
@@ -46,8 +50,13 @@ KEY_SOURCE_FILES = [
     ROOT / "src" / "external_validate.py",
     ROOT / "src" / "export_onnx.py",
     ROOT / "src" / "benchmark_inference.py",
+    ROOT / "src" / "plant_id.py",
+    ROOT / "src" / "problem_taxonomy.py",
+    ROOT / "src" / "image_retrieval.py",
+    ROOT / "scripts" / "run_advanced_demo_check.py",
     ROOT / "Makefile",
     ROOT / "README.md",
+    ROOT / ".env.example",
 ]
 
 

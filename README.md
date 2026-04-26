@@ -30,6 +30,9 @@ Early disease detection can help farmers, agronomists, and researchers prioritiz
 - Evaluation with accuracy, macro F1, weighted F1, top-3 accuracy, confusion matrices, calibration curve, and misclassification gallery
 - External validation on PlantDoc or any ImageFolder-style dataset with overlapping classes
 - Confidence thresholding and uncertainty warnings
+- Optional two-stage advanced mode with plant/species identification plus local disease/problem recognition
+- Broad symptom taxonomy that maps narrow disease labels into practical plant health issue categories
+- Visual similarity retrieval for comparing uploads with indexed training examples
 - Grad-CAM single-image explanations and gallery generation
 - NASA POWER weather feature extraction and synthetic RandomForest risk model
 - Optional MLflow experiment tracking
@@ -60,7 +63,53 @@ NASA POWER weather data
 Trained PyTorch checkpoint
   -> ONNX export
   -> CPU inference benchmark
+
+Advanced mode
+  -> optional Pl@ntNet plant ID or local species-model adapter
+  -> local disease/problem classifier
+  -> broad problem taxonomy
+  -> optional similar-image retrieval
+  -> weather-aware conservative interpretation
 ```
+
+## Advanced Plant Health Recognition Mode
+
+CropVision can run as a two-stage plant health recognition system:
+
+1. Identify the plant/species using the optional Pl@ntNet API or an optional local species-recognition adapter.
+2. Diagnose the visible health issue using the local disease/problem model, confidence thresholds, broad symptom categories, weather risk, and similar-image retrieval.
+
+The local disease model recognizes only the classes it was trained on. Pl@ntNet can expand plant/species identification to many more plants, but it is optional and requires a free API key. If no API key is provided, the app still runs with local models and shows a clear message.
+
+The problem taxonomy turns narrow labels such as `Tomato___Early_blight` into broader categories such as `blight_like_symptoms`. Retrieval mode shows visually similar indexed training images so a user can compare the upload against known examples. The system is uncertainty-aware and should not force diagnoses for unknown classes, low-confidence predictions, or images outside the training distribution.
+
+CropVision Advanced Mode uses a two-stage plant health recognition pipeline. First, it identifies the plant using an optional large-scale species identification service or local species model. Then it applies a local disease/problem classifier, maps narrow disease classes into broader symptom categories, retrieves visually similar examples, and combines the result with weather-derived crop stress features. This makes the system more realistic than a closed-set classifier because it can separate plant identification from problem detection and report uncertainty when the image falls outside the model’s training distribution.
+
+Create a local `.env` file for optional Pl@ntNet support:
+
+```bash
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+```text
+PLANTNET_API_KEY=your_api_key_here
+```
+
+Build a visual retrieval index:
+
+```bash
+python -m src.image_retrieval --data_dir data/processed/plantvillage_sample --build_index
+```
+
+Run the advanced demo check:
+
+```bash
+python scripts/run_advanced_demo_check.py
+```
+
+Optional local species models can be connected through `src/local_species_model.py`. Large iNaturalist/timm models can be heavy, so they are not required by default.
 
 ## Dataset Setup
 
@@ -232,6 +281,10 @@ The app supports:
 
 - Image upload
 - Optional demo images from `sample_images/`
+- Local disease-only mode
+- Advanced plant ID + disease model mode
+- Optional Pl@ntNet API plant identification
+- Optional visual similarity retrieval
 - Top prediction and top-3 probabilities
 - Confidence threshold slider
 - Uncertainty warnings
@@ -240,6 +293,12 @@ The app supports:
 - Educational disclaimer
 
 The app launches without requiring external APIs. Weather features are only fetched when the user enables that option.
+
+Run:
+
+```bash
+streamlit run app/streamlit_app.py
+```
 
 ## Hugging Face Spaces Deployment
 
@@ -275,9 +334,11 @@ make inspect
 make train
 make evaluate
 make external-validate DATA_DIR=data/raw/plantdoc
+make retrieval
 make export-onnx
 make benchmark
 make mlflow-train
+make advanced-check
 make app
 make check
 ```
@@ -291,6 +352,9 @@ make check PYTHON=.venv/bin/python
 ## Known Limitations
 
 - PlantVillage images are controlled and may not generalize to field images.
+- Advanced plant ID depends on Pl@ntNet availability and API-key configuration unless a local species model is configured.
+- Local disease/problem recognition remains closed-set to trained classes.
+- Retrieval quality depends on the indexed image set and feature extractor.
 - External validation depends on exact class-name overlap.
 - Weather risk is synthetic/demo unless trained with real disease incidence data.
 - Grad-CAM is an interpretability aid, not proof of causal disease symptoms.
@@ -308,9 +372,9 @@ make check PYTHON=.venv/bin/python
 ## Resume Bullets
 
 - Built an explainable plant disease classification system using PyTorch transfer learning, Grad-CAM visualizations, and confidence-aware predictions.
-- Developed a multimodal agtech ML dashboard combining leaf image classification with weather-derived crop stress risk features.
+- Developed a two-stage plant health recognition dashboard combining optional plant species identification, local disease classification, broad symptom taxonomy, and weather-derived crop stress risk features.
 - Implemented model evaluation tooling including top-k accuracy, macro F1, confusion matrices, calibration analysis, external validation, and misclassification galleries.
-- Added deployment-oriented ML engineering features including ONNX export, CPU inference benchmarking, optional MLflow tracking, health checks, tests, and a Streamlit/Hugging Face Spaces workflow.
+- Added retrieval-based visual similarity, ONNX export, CPU inference benchmarking, optional MLflow tracking, health checks, tests, and a Streamlit/Hugging Face Spaces workflow.
 
 ## Interview Explanation
 
