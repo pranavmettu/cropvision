@@ -54,14 +54,14 @@ def analyze_leaf_visual_triage(image_path: str | Path) -> dict[str, Any]:
         confidence = min(0.72, 0.45 + brown_ratio + dark_spot_ratio)
         observations.append("Brown/dark regions may indicate necrosis, spotting, old damage, or dead tissue.")
     if yellow_ratio > 0.10 or pale_ratio > 0.16:
-        category = "nutrient_deficiency_like_yellowing" if category == "unknown_or_uncertain" else category
-        confidence = max(confidence, min(0.70, 0.42 + yellow_ratio + pale_ratio))
-        observations.append("Yellowing or pale green tissue is visible, which can be associated with nutrient stress, water stress, or disease.")
-    if green_ratio > 0.20 and brown_ratio < 0.08 and yellow_ratio < 0.12 and edge_ratio > 0.22:
+        category = "nutrient_deficiency_like_yellowing"
+        confidence = max(confidence, min(0.68, 0.40 + yellow_ratio + pale_ratio))
+        observations.append("Yellowing or pale green tissue is visible, which can be associated with nutrient stress, water stress, root stress, or disease.")
+    if green_ratio > 0.16 and brown_ratio < 0.10 and (edge_ratio > 0.16 or pale_ratio > 0.12):
         category = "abiotic_stress"
-        confidence = max(confidence, 0.55)
-        observations.append("The leaf appears green but textured, curled, or puckered; this can fit abiotic stress, edema, herbicide drift, viral-like curl, or growth stress.")
-    if green_ratio > 0.25 and brown_ratio < 0.03 and yellow_ratio < 0.05 and edge_ratio < 0.18:
+        confidence = max(confidence, 0.58)
+        observations.append("The leaf appears textured, curled, puckered, or unevenly colored; this can fit abiotic stress, edema, herbicide drift, viral-like curl, or growth stress.")
+    if not observations and green_ratio > 0.25 and brown_ratio < 0.03 and yellow_ratio < 0.05 and pale_ratio < 0.08 and edge_ratio < 0.16:
         category = "healthy"
         confidence = max(confidence, 0.50)
         observations.append("The visible leaf area is mostly green without strong yellowing or necrotic spotting.")

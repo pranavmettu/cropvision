@@ -43,6 +43,8 @@ st.markdown(
         border-radius: 8px;
         padding: 1rem;
         background: #f8faf9;
+        color: #17201a;
+        line-height: 1.5;
     }
     </style>
     """,
