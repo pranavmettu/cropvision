@@ -26,6 +26,37 @@ from src.dataset import create_dataloaders
 from src.utils import get_device, save_json, set_seed
 
 
+def maybe_start_mlflow(args: argparse.Namespace):
+    """Start an MLflow run only when requested and installed."""
+    if not getattr(args, "use_mlflow", False):
+        return None
+    try:
+        import mlflow  # type: ignore
+    except ImportError:
+        print("MLflow requested but not installed. Install with `pip install mlflow`; continuing without MLflow logging.")
+        return None
+
+    mlflow.set_experiment(args.mlflow_experiment)
+    run = mlflow.start_run()
+    mlflow.log_params(
+        {
+            "data_dir": str(args.data_dir),
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "lr": args.lr,
+            "weight_decay": args.weight_decay,
+            "model_name": args.model_name,
+            "freeze_backbone": args.freeze_backbone,
+            "weighted_loss": args.weighted_loss,
+            "early_stopping_patience": args.early_stopping_patience,
+            "max_images_per_class": args.max_images_per_class,
+            "confidence_threshold": args.confidence_threshold,
+            "seed": args.seed,
+        }
+    )
+    return mlflow, run
+
+
 def build_model(num_classes: int, architecture: str = "resnet18", pretrained: bool = True) -> nn.Module:
     def _weights_or_none(weights_enum):
         if not pretrained:
@@ -166,46 +197,48 @@ def train(args: argparse.Namespace) -> None:
     set_seed(args.seed)
     device = get_device(args.cpu)
     data_dir = Path(args.data_dir)
+    mlflow_context = maybe_start_mlflow(args)
+    mlflow = mlflow_context[0] if mlflow_context else None
 
-    train_loader, val_loader, class_names = create_dataloaders(
-        data_dir=data_dir,
-        batch_size=args.batch_size,
-        val_split=args.val_split,
-        num_workers=args.num_workers,
-        seed=args.seed,
-        max_images_per_class=args.max_images_per_class,
-    )
-    model_name = args.model_name or args.architecture
-    model = build_model(len(class_names), model_name, pretrained=not args.no_pretrained).to(device)
-    if args.freeze_backbone:
-        freeze_backbone_layers(model, model_name)
-        print("Frozen backbone enabled: training classifier head only.")
+    try:
+        train_loader, val_loader, class_names = create_dataloaders(
+            data_dir=data_dir,
+            batch_size=args.batch_size,
+            val_split=args.val_split,
+            num_workers=args.num_workers,
+            seed=args.seed,
+            max_images_per_class=args.max_images_per_class,
+        )
+        model_name = args.model_name or args.architecture
+        model = build_model(len(class_names), model_name, pretrained=not args.no_pretrained).to(device)
+        if args.freeze_backbone:
+            freeze_backbone_layers(model, model_name)
+            print("Frozen backbone enabled: training classifier head only.")
 
-    train_labels = _labels_from_dataset(train_loader.dataset)
-    plot_class_distribution(class_names, train_labels, FIGURES_DIR / "class_distribution.png")
+        train_labels = _labels_from_dataset(train_loader.dataset)
+        plot_class_distribution(class_names, train_labels, FIGURES_DIR / "class_distribution.png")
 
-    if args.weighted_loss:
-        criterion = nn.CrossEntropyLoss(weight=class_weights_from_loader(train_loader, len(class_names), device))
-        print("Weighted loss enabled for class imbalance.")
-    else:
-        criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=1)
+        if args.weighted_loss:
+            criterion = nn.CrossEntropyLoss(weight=class_weights_from_loader(train_loader, len(class_names), device))
+            print("Weighted loss enabled for class imbalance.")
+        else:
+            criterion = nn.CrossEntropyLoss()
+        optimizer = optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=args.lr, weight_decay=args.weight_decay)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="max", factor=0.5, patience=1)
 
-    best_f1 = -1.0
-    best_val_loss = float("inf")
-    epochs_without_improvement = 0
-    history: list[dict[str, float]] = []
-    checkpoint_path = Path(args.output)
-    class_names_path = Path(args.class_names_path)
+        best_f1 = -1.0
+        best_val_loss = float("inf")
+        epochs_without_improvement = 0
+        history: list[dict[str, float]] = []
+        checkpoint_path = Path(args.output)
+        class_names_path = Path(args.class_names_path)
 
-    for epoch in range(1, args.epochs + 1):
-        train_loss, train_acc, train_f1 = run_epoch(model, train_loader, criterion, device, optimizer)
-        val_loss, val_acc, val_f1 = run_epoch(model, val_loader, criterion, device)
-        scheduler.step(val_f1)
-        current_lr = optimizer.param_groups[0]["lr"]
-        history.append(
-            {
+        for epoch in range(1, args.epochs + 1):
+            train_loss, train_acc, train_f1 = run_epoch(model, train_loader, criterion, device, optimizer)
+            val_loss, val_acc, val_f1 = run_epoch(model, val_loader, criterion, device)
+            scheduler.step(val_f1)
+            current_lr = optimizer.param_groups[0]["lr"]
+            metrics = {
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "train_acc": train_acc,
@@ -215,44 +248,60 @@ def train(args: argparse.Namespace) -> None:
                 "val_macro_f1": val_f1,
                 "lr": current_lr,
             }
-        )
-        print(
-            f"Epoch {epoch:02d}/{args.epochs} | "
-            f"train_loss={train_loss:.4f} | val_loss={val_loss:.4f} | "
-            f"train_acc={train_acc:.4f} | val_acc={val_acc:.4f} | "
-            f"val_macro_f1={val_f1:.4f} | lr={current_lr:.2e}"
-        )
-
-        if val_f1 > best_f1:
-            best_f1 = val_f1
-            best_val_loss = val_loss
-            epochs_without_improvement = 0
-            checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "architecture": model_name,
-                    "num_classes": len(class_names),
-                    "class_names": class_names,
-                    "best_val_macro_f1": best_f1,
-                    "best_val_loss": best_val_loss,
-                    "confidence_threshold": args.confidence_threshold,
-                },
-                checkpoint_path,
+            history.append(metrics)
+            if mlflow is not None:
+                mlflow.log_metrics({key: value for key, value in metrics.items() if key != "epoch"}, step=epoch)
+            print(
+                f"Epoch {epoch:02d}/{args.epochs} | "
+                f"train_loss={train_loss:.4f} | val_loss={val_loss:.4f} | "
+                f"train_acc={train_acc:.4f} | val_acc={val_acc:.4f} | "
+                f"val_macro_f1={val_f1:.4f} | lr={current_lr:.2e}"
             )
-            save_json(class_names, class_names_path)
-            print(f"Saved best model to {checkpoint_path} with macro F1={best_f1:.4f}")
-        else:
-            epochs_without_improvement += 1
-            if args.early_stopping_patience > 0 and epochs_without_improvement >= args.early_stopping_patience:
-                print(f"Early stopping after {epoch} epochs without macro F1 improvement.")
-                break
 
-    history_path = Path(args.history_path)
-    history_path.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(history).to_csv(history_path, index=False)
-    plot_training_curves(history, FIGURES_DIR)
-    print(f"Saved training history to {history_path}")
+            if val_f1 > best_f1:
+                best_f1 = val_f1
+                best_val_loss = val_loss
+                epochs_without_improvement = 0
+                checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(
+                    {
+                        "model_state_dict": model.state_dict(),
+                        "architecture": model_name,
+                        "num_classes": len(class_names),
+                        "class_names": class_names,
+                        "best_val_macro_f1": best_f1,
+                        "best_val_loss": best_val_loss,
+                        "confidence_threshold": args.confidence_threshold,
+                    },
+                    checkpoint_path,
+                )
+                save_json(class_names, class_names_path)
+                print(f"Saved best model to {checkpoint_path} with macro F1={best_f1:.4f}")
+                if mlflow is not None:
+                    mlflow.log_metric("best_val_macro_f1", best_f1)
+                    mlflow.log_metric("best_val_loss", best_val_loss)
+                    mlflow.log_param("best_model_path", str(checkpoint_path))
+            else:
+                epochs_without_improvement += 1
+                if args.early_stopping_patience > 0 and epochs_without_improvement >= args.early_stopping_patience:
+                    print(f"Early stopping after {epoch} epochs without macro F1 improvement.")
+                    break
+
+        history_path = Path(args.history_path)
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(history).to_csv(history_path, index=False)
+        plot_training_curves(history, FIGURES_DIR)
+        print(f"Saved training history to {history_path}")
+        if mlflow is not None:
+            mlflow.log_artifact(str(history_path))
+            for artifact in (FIGURES_DIR / "loss_curve.png", FIGURES_DIR / "accuracy_curve.png", FIGURES_DIR / "class_distribution.png"):
+                if artifact.exists():
+                    mlflow.log_artifact(str(artifact))
+            if checkpoint_path.exists():
+                mlflow.log_artifact(str(checkpoint_path))
+    finally:
+        if mlflow is not None:
+            mlflow.end_run()
 
 
 def parse_args() -> argparse.Namespace:
@@ -277,6 +326,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=DEFAULT_CV_MODEL_PATH)
     parser.add_argument("--class_names_path", type=Path, default=DEFAULT_CLASS_NAMES_PATH)
     parser.add_argument("--history_path", type=Path, default=DEFAULT_TRAIN_HISTORY_PATH)
+    parser.add_argument("--use_mlflow", action="store_true", help="Log optional training metadata to MLflow if installed.")
+    parser.add_argument("--mlflow_experiment", type=str, default="CropVision")
     args = parser.parse_args()
     if args.architecture is not None:
         args.model_name = args.architecture
