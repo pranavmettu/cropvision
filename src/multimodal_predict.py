@@ -9,11 +9,10 @@ from typing import Any
 import joblib
 import numpy as np
 
-from src.config import DEFAULT_CV_MODEL_PATH, DEFAULT_RETRIEVAL_ARTIFACT_PATH, DEFAULT_WEATHER_MODEL_PATH, WEATHER_FEATURE_COLUMNS
-from src.image_retrieval import find_similar_images
+from src.config import DEFAULT_WEATHER_MODEL_PATH, WEATHER_FEATURE_COLUMNS
+from src.disease_model import predict_disease
+from src.disease_reference_retrieval import find_similar_disease_examples
 from src.plant_id import identify_plant_local, identify_plant_plantnet
-from src.problem_taxonomy import map_disease_class_to_problem_category
-from src.predict_cv import predict_image
 from src.weather_features import features_to_frame, fetch_weather_features
 
 
@@ -87,7 +86,6 @@ def build_advanced_summary(
 
 def multimodal_predict(
     image_path: Path,
-    checkpoint_path: Path = DEFAULT_CV_MODEL_PATH,
     weather_model_path: Path = DEFAULT_WEATHER_MODEL_PATH,
     latitude: float | None = None,
     longitude: float | None = None,
@@ -99,7 +97,7 @@ def multimodal_predict(
     use_retrieval: bool = False,
     retrieval_top_k: int = 3,
 ) -> dict[str, Any]:
-    image_result = predict_image(image_path, checkpoint_path, confidence_threshold=confidence_threshold)
+    disease_result = predict_disease(str(image_path), top_k=3, confidence_threshold=confidence_threshold)
     plant_id = None
     if use_plantnet:
         plant_id = identify_plant_plantnet(str(image_path))
@@ -112,41 +110,47 @@ def multimodal_predict(
         weather_result = predict_weather_risk(features, weather_model_path)
 
     weather_level = weather_result["weather_risk_level"] if weather_result else None
-    raw_disease = image_result["raw_predicted_class"]
-    problem_category = "unknown_or_uncertain" if image_result["is_uncertain"] else map_disease_class_to_problem_category(raw_disease)
+    raw_disease = disease_result.get("raw_predicted_disease_class") or disease_result.get("predicted_disease_class") or "unknown"
+    label_info = disease_result.get("normalized_label_info") or {}
+    problem_category = disease_result.get("broad_problem_category", "unknown_or_uncertain")
     similar_examples = []
-    if use_retrieval and DEFAULT_RETRIEVAL_ARTIFACT_PATH.exists():
-        similar_examples = find_similar_images(str(image_path), top_k=retrieval_top_k)
+    if use_retrieval:
+        similar_examples = find_similar_disease_examples(str(image_path), top_k=retrieval_top_k)
     final_summary = build_advanced_summary(
         plant_id,
         raw_disease,
         problem_category,
-        image_result["confidence"],
-        image_result["is_uncertain"],
+        float(disease_result.get("confidence") or 0.0),
+        bool(disease_result.get("is_uncertain", True)),
         weather_level,
     )
     return {
+        "plant_identification": plant_id,
         "plant_id": plant_id,
-        "disease_prediction": {
-            "predicted_class": image_result["predicted_class"],
-            "raw_predicted_class": raw_disease,
-            "confidence": image_result["confidence"],
-        },
+        "disease_prediction": disease_result,
+        "predicted_plant_species": label_info.get("plant_species", "unknown"),
+        "predicted_disease_name": label_info.get("disease_name", "unknown"),
         "problem_category": problem_category,
-        "top_3_predictions": image_result["top_3_predictions"],
+        "broad_problem_category": problem_category,
+        "confidence": disease_result.get("confidence"),
+        "top_3_disease_predictions": disease_result.get("top_k_predictions", []),
+        "top_3_predictions": disease_result.get("top_k_predictions", []),
         "uncertainty": {
-            "is_uncertain": image_result["is_uncertain"],
-            "reason": image_result["uncertainty_reason"],
+            "is_uncertain": disease_result.get("is_uncertain", True),
+            "reason": disease_result.get("uncertainty_reason"),
         },
         "weather_risk": weather_result,
+        "similar_disease_examples": similar_examples,
         "similar_examples": similar_examples,
+        "gradcam_path_or_image": None,
         "final_summary": final_summary,
+        "disclaimer": "Educational ML demo only. Not professional crop diagnosis or treatment advice.",
         "educational_disclaimer": "Educational ML demo only. Not professional crop diagnosis or treatment advice.",
         # Backward-compatible keys for older scripts.
-        "predicted_disease": image_result["predicted_class"],
+        "predicted_disease": disease_result.get("predicted_disease_class"),
         "raw_predicted_disease": raw_disease,
-        "image_confidence": image_result["confidence"],
-        "top_predictions": image_result["top_predictions"],
+        "image_confidence": disease_result.get("confidence"),
+        "top_predictions": disease_result.get("top_k_predictions", []),
         "weather": weather_result,
         "combined_risk_summary": final_summary,
     }
@@ -155,7 +159,6 @@ def multimodal_predict(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run CropVision multimodal prediction.")
     parser.add_argument("--image_path", type=Path, required=True)
-    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CV_MODEL_PATH)
     parser.add_argument("--weather_model", type=Path, default=DEFAULT_WEATHER_MODEL_PATH)
     parser.add_argument("--latitude", type=float, default=None)
     parser.add_argument("--longitude", type=float, default=None)
@@ -173,7 +176,6 @@ if __name__ == "__main__":
     print(
         multimodal_predict(
             args.image_path,
-            args.checkpoint,
             args.weather_model,
             args.latitude,
             args.longitude,

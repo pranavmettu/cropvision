@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.config import DEFAULT_CLASS_NAMES_PATH, DEFAULT_CV_MODEL_PATH, DEFAULT_WEATHER_MODEL_PATH, FIGURES_DIR, MODEL_DIR, REPORTS_DIR
+from src.disease_model import DISEASE_CLASS_NAMES_PATH, DISEASE_MODEL_PATH
 
 
 REQUIRED_FOLDERS = [
@@ -49,6 +50,15 @@ IMPORTS = [
     "src.reference_retrieval",
     "src.feedback_store",
     "src.retrain_with_feedback",
+    "src.disease_label_normalizer",
+    "src.disease_model",
+    "src.install_disease_model",
+    "src.train_disease_model",
+    "src.evaluate_disease_model",
+    "src.disease_dataset_manager",
+    "src.disease_reference_retrieval",
+    "src.retrain_disease_with_feedback",
+    "src.disease_pseudo_label",
 ]
 
 KEY_SOURCE_FILES = [
@@ -67,6 +77,15 @@ KEY_SOURCE_FILES = [
     ROOT / "src" / "reference_retrieval.py",
     ROOT / "src" / "feedback_store.py",
     ROOT / "src" / "retrain_with_feedback.py",
+    ROOT / "src" / "disease_label_normalizer.py",
+    ROOT / "src" / "disease_model.py",
+    ROOT / "src" / "install_disease_model.py",
+    ROOT / "src" / "train_disease_model.py",
+    ROOT / "src" / "evaluate_disease_model.py",
+    ROOT / "src" / "disease_dataset_manager.py",
+    ROOT / "src" / "disease_reference_retrieval.py",
+    ROOT / "src" / "retrain_disease_with_feedback.py",
+    ROOT / "src" / "disease_pseudo_label.py",
     ROOT / "scripts" / "run_advanced_demo_check.py",
     ROOT / "Makefile",
     ROOT / "README.md",
@@ -109,6 +128,10 @@ def main() -> int:
     for artifact in (DEFAULT_CV_MODEL_PATH, DEFAULT_CLASS_NAMES_PATH, DEFAULT_WEATHER_MODEL_PATH):
         status = "OK" if artifact.exists() else "OPTIONAL/MISSING"
         print(f"{status} artifact: {artifact.relative_to(ROOT)}")
+
+    for artifact in (DISEASE_MODEL_PATH, DISEASE_CLASS_NAMES_PATH):
+        status = "OK" if artifact.exists() else "OPTIONAL/MISSING"
+        print(f"{status} disease artifact: {artifact.relative_to(ROOT)}")
 
     onnx_model = MODEL_DIR / "cropvision_cv.onnx"
     status = "OK" if onnx_model.exists() else "OPTIONAL/MISSING"

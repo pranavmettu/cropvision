@@ -25,6 +25,10 @@ def _feature_model_from_classifier(model: nn.Module, architecture: str) -> nn.Mo
         return nn.Sequential(*list(model.children())[:-1])
     if architecture == "efficientnet_b0":
         return nn.Sequential(model.features, nn.AdaptiveAvgPool2d((1, 1)))
+    if architecture == "mobilenet_v3_small":
+        return nn.Sequential(model.features, nn.AdaptiveAvgPool2d((1, 1)))
+    if architecture == "convnext_tiny":
+        return nn.Sequential(model.features, nn.AdaptiveAvgPool2d((1, 1)))
     raise ValueError(f"Unsupported architecture for retrieval: {architecture}")
 
 

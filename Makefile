@@ -1,7 +1,7 @@
 PYTHON ?= python
 DATA_DIR ?= data/raw/plantvillage
 
-.PHONY: setup datasets-list import-plantvillage import-plantdoc build-reference-data train-reference inspect train evaluate external-validate weather gallery retrieval build-reference-index export-onnx benchmark mlflow-train retrain-feedback advanced-check app check health test
+.PHONY: setup datasets-list import-plantvillage import-plantdoc build-reference-data train-reference disease-import disease-train disease-evaluate disease-index disease-feedback-train disease-pseudo-labels inspect train evaluate external-validate weather gallery retrieval build-reference-index export-onnx benchmark mlflow-train retrain-feedback advanced-check app check health test
 
 setup:
 	$(PYTHON) -m pip install -r requirements.txt
@@ -20,6 +20,24 @@ build-reference-data:
 
 train-reference:
 	$(PYTHON) -m src.train_cv --data_dir data/processed/cropvision_reference_train --model_name efficientnet_b0 --epochs 8 --batch_size 16 --freeze_backbone --weighted_loss --label_smoothing 0.05 --model_version_name reference_v1
+
+disease-import:
+	$(PYTHON) -m src.disease_dataset_manager --import-local --dataset plantvillage --source_dir data/raw/plantvillage --output_dir data/processed/cropvision_reference_train
+
+disease-train:
+	$(PYTHON) -m src.train_disease_model --data_dir data/processed/cropvision_reference_train --model_name efficientnet_b0 --epochs 5 --batch_size 16 --freeze_backbone --weighted_loss --label_smoothing 0.05 --model_version_name disease_v1
+
+disease-evaluate:
+	$(PYTHON) -m src.evaluate_disease_model --data_dir data/processed/cropvision_reference_train
+
+disease-index:
+	$(PYTHON) -m src.disease_reference_retrieval --build_index --data_dir data/processed/cropvision_reference_train --output_dir models/disease_reference_index
+
+disease-feedback-train:
+	$(PYTHON) -m src.retrain_disease_with_feedback --base_data_dir data/processed/cropvision_reference_train --feedback_dir data/user_feedback/verified --model_version_name disease_feedback_v1 --epochs 5 --batch_size 16
+
+disease-pseudo-labels:
+	$(PYTHON) -m src.disease_pseudo_label --input_dir data/user_feedback/pending/images --threshold 0.95
 
 inspect:
 	$(PYTHON) -m src.inspect_dataset --data_dir $(DATA_DIR)

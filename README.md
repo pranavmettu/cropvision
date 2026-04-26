@@ -103,6 +103,59 @@ Latest outputs:
 - `models/cropvision_cv.pt`
 - `models/class_names.json`
 
+## Disease Identification Model
+
+Plant ID and disease ID are separate layers. Plant ID estimates what plant the image contains, while the disease model predicts the visible disease or plant-health problem from the uploaded image. The dedicated disease model reads from:
+
+- `models/disease/cropvision_disease_model.pt`
+- `models/disease/disease_class_names.json`
+
+The disease model can be trained from PlantVillage, Kaggle New Plant Diseases Dataset, or any ImageFolder-style disease dataset. It can also build a visual reference database so the app can show similar disease examples. User feedback is saved only with permission and must be explicitly retrained later; CropVision does not blindly train on its own predictions.
+
+Prepare disease dataset:
+
+```bash
+python -m src.disease_dataset_manager --import-local --dataset plantvillage --source_dir data/raw/plantvillage --output_dir data/processed/cropvision_reference_train
+```
+
+Train disease model:
+
+```bash
+python -m src.train_disease_model --data_dir data/processed/cropvision_reference_train --model_name efficientnet_b0 --epochs 5 --batch_size 16 --freeze_backbone --weighted_loss --label_smoothing 0.05 --model_version_name disease_v1
+```
+
+Evaluate disease model:
+
+```bash
+python -m src.evaluate_disease_model --data_dir data/processed/cropvision_reference_train
+```
+
+Build disease reference index:
+
+```bash
+python -m src.disease_reference_retrieval --build_index --data_dir data/processed/cropvision_reference_train --output_dir models/disease_reference_index
+```
+
+Install an existing compatible checkpoint:
+
+```bash
+python -m src.install_disease_model --mode local_checkpoint --checkpoint_path PATH --class_names_path PATH
+```
+
+Retrain with verified feedback:
+
+```bash
+python -m src.retrain_disease_with_feedback --base_data_dir data/processed/cropvision_reference_train --feedback_dir data/user_feedback/verified --model_version_name disease_feedback_v1 --epochs 5 --batch_size 16
+```
+
+Generate pseudo-label suggestions for review:
+
+```bash
+python -m src.disease_pseudo_label --input_dir data/user_feedback/pending/images --threshold 0.95
+```
+
+Pseudo-labels must be reviewed before training. They are suggestions only and are not moved into verified training data automatically.
+
 ## Evaluation
 
 ```bash
@@ -187,6 +240,12 @@ make import-plantvillage
 make import-plantdoc
 make build-reference-data
 make train-reference
+make disease-import
+make disease-train
+make disease-evaluate
+make disease-index
+make disease-feedback-train
+make disease-pseudo-labels
 make external-validate DATA_DIR=data/processed/reference_datasets/plantdoc
 make build-reference-index
 make app
