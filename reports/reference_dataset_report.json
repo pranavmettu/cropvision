@@ -1,0 +1,16 @@
+{
+  "datasets": [
+    "plantvillage"
+  ],
+  "source_root": "data/processed/reference_datasets",
+  "output_dir": "data/processed/cropvision_reference_train",
+  "total_images": 0,
+  "total_classes": 0,
+  "duplicate_count": 0,
+  "skipped_classes": [
+    "plantvillage:missing_dataset_dir"
+  ],
+  "largest_classes": [],
+  "smallest_classes": [],
+  "class_distribution": {}
+}

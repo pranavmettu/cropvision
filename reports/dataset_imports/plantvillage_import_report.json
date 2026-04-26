@@ -1,0 +1,11 @@
+{
+  "dataset": "plantvillage",
+  "source_path": "/var/folders/f_/0r24r6l95wv2vzpr3bwp57xw0000gn/T/tmpokjlb0jn/source",
+  "output_path": "/var/folders/f_/0r24r6l95wv2vzpr3bwp57xw0000gn/T/tmpokjlb0jn/out",
+  "num_classes": 1,
+  "num_images": 1,
+  "skipped_files": [],
+  "class_distribution": {
+    "Tomato___healthy": 1
+  }
+}
