@@ -27,6 +27,7 @@ from src.image_retrieval import find_similar_images  # noqa: E402
 from src.multimodal_predict import build_advanced_summary, predict_weather_risk  # noqa: E402
 from src.plant_id import identify_plant_local, identify_plant_plantnet  # noqa: E402
 from src.problem_taxonomy import map_disease_class_to_problem_category  # noqa: E402
+from src.visual_triage import analyze_leaf_visual_triage  # noqa: E402
 from src.weather_features import fetch_weather_features  # noqa: E402
 
 
@@ -140,7 +141,20 @@ if mode == "Advanced plant ID + disease model":
         st.info(plant_id_result.get("message", "Plant ID unavailable."))
 
 if not DEFAULT_CV_MODEL_PATH.exists():
-    st.info("No trained disease model found. Train it with `python -m src.train_cv --data_dir data/raw/plantvillage --epochs 3`.")
+    st.subheader("Broad visual triage")
+    triage = analyze_leaf_visual_triage(tmp_path)
+    st.info(
+        "No trained disease model found, so this is a rule-based visual triage fallback. "
+        "Train the PyTorch disease model for real model predictions."
+    )
+    st.metric(triage["problem_category"], f"{triage['confidence']:.0%}")
+    st.write("Observed signals:")
+    for observation in triage["observations"]:
+        st.write(f"- {observation}")
+    with st.expander("Heuristic image metrics"):
+        st.json(triage["metrics"])
+    st.subheader("Final conservative interpretation")
+    st.markdown(f"<div class='interpretation-card'>{triage['final_summary']}</div>", unsafe_allow_html=True)
     st.stop()
 
 try:
